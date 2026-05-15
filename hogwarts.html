@@ -1,0 +1,1888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Game with HUD and Inventory</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <script>
+
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const world = { width: 10000, height: 10000 };
+  const camera = { x: 0, y: 0 };
+
+  const player = {
+    x: world.width / 2,
+    y: world.height / 2,
+    radius: 15,
+    speed: 4
+  };
+
+  let hasWand = false, hasCloak = false;
+  let wandEnabled = false, cloakEnabled = false;
+  let wandLevel = 1; // max unlocked power level (1–3)
+  const wandRadiusLevels = [0, 180, 260, 360];
+  let currentRadius = 0;
+  let wandCharge = 100; // 0–100; drains while on, recharges while off
+  const keys = { w: false, a: false, s: false, d: false };
+  let playerAngle = -Math.PI / 2;
+  let walkFrame = 0;
+
+  let playerHP = 3;
+  let invincibleTimer = 0;
+  const INVINCIBLE_FRAMES = 90;
+  let gameState = 'menu'; // 'menu' | 'playing' | 'paused' | 'won' | 'dead'
+
+  const HOUSES = [
+    { name: 'Gryffindor', robe: '#8b0000', robeDark: '#6b0000', trim: '#c8a000', hat: '#1a0000', accent: '#ffd700' },
+    { name: 'Hufflepuff', robe: '#c49a00', robeDark: '#8a6c00', trim: '#333333', hat: '#1a1400', accent: '#f0e06a' },
+    { name: 'Ravenclaw',  robe: '#003580', robeDark: '#002260', trim: '#c0a050', hat: '#000d1a', accent: '#7eb8f7' },
+    { name: 'Slytherin',  robe: '#1a5c2a', robeDark: '#0f3d1c', trim: '#aaaaaa', hat: '#0a1a0a', accent: '#aaffaa' },
+  ];
+  let playerHouse = 0;
+  let hoveredHouse = 0;
+
+  const COMPANIONS = [
+    {
+      name: 'Owl',
+      hint: 'Scouts ahead — reveals a\nslightly wider area around you',
+      color: '#c8a060',
+      draw(c, x, y, s) {
+        c.save(); c.translate(x, y); c.scale(s, s);
+        // Body
+        c.fillStyle = '#a07840'; c.beginPath(); c.ellipse(0, 4, 10, 13, 0, 0, Math.PI*2); c.fill();
+        // Wings
+        c.fillStyle = '#7a5820';
+        c.beginPath(); c.ellipse(-13, 6, 8, 5, -0.4, 0, Math.PI*2); c.fill();
+        c.beginPath(); c.ellipse(13, 6, 8, 5, 0.4, 0, Math.PI*2); c.fill();
+        // Head
+        c.fillStyle = '#c8a060'; c.beginPath(); c.arc(0, -9, 9, 0, Math.PI*2); c.fill();
+        // Ear tufts
+        c.fillStyle = '#7a5820';
+        c.beginPath(); c.moveTo(-5,-16); c.lineTo(-8,-22); c.lineTo(-2,-17); c.closePath(); c.fill();
+        c.beginPath(); c.moveTo(5,-16);  c.lineTo(8,-22);  c.lineTo(2,-17);  c.closePath(); c.fill();
+        // Eyes
+        c.fillStyle='#ffee88'; c.beginPath(); c.arc(-3,-9,3,0,Math.PI*2); c.fill();
+        c.beginPath(); c.arc(3,-9,3,0,Math.PI*2); c.fill();
+        c.fillStyle='#1a0800'; c.beginPath(); c.arc(-3,-9,1.5,0,Math.PI*2); c.fill();
+        c.beginPath(); c.arc(3,-9,1.5,0,Math.PI*2); c.fill();
+        // Beak
+        c.fillStyle='#d4a030'; c.beginPath(); c.moveTo(-2,-5); c.lineTo(2,-5); c.lineTo(0,-2); c.closePath(); c.fill();
+        c.restore();
+      }
+    },
+    {
+      name: 'Cat',
+      hint: 'Marks the nearest uncollected\nitem on your Marauder\'s Map',
+      color: '#dd8844',
+      draw(c, x, y, s) {
+        c.save(); c.translate(x, y); c.scale(s, s);
+        // Body
+        c.fillStyle = '#cc7733'; c.beginPath(); c.ellipse(0, 8, 9, 12, 0, 0, Math.PI*2); c.fill();
+        // Tail
+        c.strokeStyle = '#cc7733'; c.lineWidth = 3; c.lineCap = 'round';
+        c.beginPath(); c.moveTo(9, 14); c.quadraticCurveTo(20, 10, 16, 0); c.stroke();
+        // Head
+        c.fillStyle = '#dd8844'; c.beginPath(); c.arc(0, -7, 9, 0, Math.PI*2); c.fill();
+        // Ears
+        c.fillStyle = '#cc7733';
+        c.beginPath(); c.moveTo(-7,-13); c.lineTo(-11,-21); c.lineTo(-2,-14); c.closePath(); c.fill();
+        c.beginPath(); c.moveTo(7,-13);  c.lineTo(11,-21);  c.lineTo(2,-14);  c.closePath(); c.fill();
+        c.fillStyle='#ffaaaa';
+        c.beginPath(); c.moveTo(-7,-14); c.lineTo(-9,-19); c.lineTo(-3,-15); c.closePath(); c.fill();
+        c.beginPath(); c.moveTo(7,-14);  c.lineTo(9,-19);  c.lineTo(3,-15);  c.closePath(); c.fill();
+        // Eyes
+        c.fillStyle='#44cc44'; c.beginPath(); c.ellipse(-3,-7,3,2.5,0,0,Math.PI*2); c.fill();
+        c.beginPath(); c.ellipse(3,-7,3,2.5,0,0,Math.PI*2); c.fill();
+        c.fillStyle='#1a0800'; c.beginPath(); c.ellipse(-3,-7,1,2,0,0,Math.PI*2); c.fill();
+        c.beginPath(); c.ellipse(3,-7,1,2,0,0,Math.PI*2); c.fill();
+        // Nose + whiskers
+        c.fillStyle='#ffaaaa'; c.beginPath(); c.arc(0,-3,1.5,0,Math.PI*2); c.fill();
+        c.strokeStyle='rgba(255,255,255,0.6)'; c.lineWidth=0.8;
+        c.beginPath(); c.moveTo(-2,-3); c.lineTo(-10,-2); c.stroke();
+        c.beginPath(); c.moveTo(2,-3);  c.lineTo(10,-2);  c.stroke();
+        c.restore();
+      }
+    },
+    {
+      name: 'Toad',
+      hint: 'Croaks to repel nearby dementors\nwith a magical shockwave',
+      color: '#66aa44',
+      draw(c, x, y, s) {
+        c.save(); c.translate(x, y); c.scale(s, s);
+        // Body — wide squat shape
+        c.fillStyle = '#558833'; c.beginPath(); c.ellipse(0, 8, 14, 10, 0, 0, Math.PI*2); c.fill();
+        // Belly
+        c.fillStyle = '#aaccaa'; c.beginPath(); c.ellipse(0, 10, 9, 7, 0, 0, Math.PI*2); c.fill();
+        // Back legs
+        c.strokeStyle='#446622'; c.lineWidth=4; c.lineCap='round';
+        c.beginPath(); c.moveTo(-10,14); c.lineTo(-16,18); c.lineTo(-18,14); c.stroke();
+        c.beginPath(); c.moveTo(10,14);  c.lineTo(16,18);  c.lineTo(18,14);  c.stroke();
+        // Head
+        c.fillStyle = '#66aa44'; c.beginPath(); c.ellipse(0, -4, 12, 9, 0, 0, Math.PI*2); c.fill();
+        // Eyes — bulging on top
+        c.fillStyle='#88cc44'; c.beginPath(); c.arc(-6,-10,5,0,Math.PI*2); c.fill();
+        c.beginPath(); c.arc(6,-10,5,0,Math.PI*2); c.fill();
+        c.fillStyle='#1a2200'; c.beginPath(); c.arc(-6,-10,2.5,0,Math.PI*2); c.fill();
+        c.beginPath(); c.arc(6,-10,2.5,0,Math.PI*2); c.fill();
+        c.fillStyle='rgba(255,255,255,0.5)'; c.beginPath(); c.arc(-5,-11,1,0,Math.PI*2); c.fill();
+        c.beginPath(); c.arc(7,-11,1,0,Math.PI*2); c.fill();
+        // Mouth line
+        c.strokeStyle='#335522'; c.lineWidth=1.5;
+        c.beginPath(); c.moveTo(-8,-2); c.quadraticCurveTo(0,2,8,-2); c.stroke();
+        c.restore();
+      }
+    },
+  ];
+  let playerCompanion = 0;
+  let hoveredCompanion = 0;
+
+  // Companion state
+  const companion = {
+    x: 5000, y: 5000,
+    owlAngle: 0,
+    catTarget: null,          // nearest uncollected item {x, y} for minimap highlight
+    catPulse: 0,              // 0..2π oscillating for pulsing dot
+    toadRepelInterval: 0,     // counts up to next shockwave
+    toadRepelWave: 0,         // 0 = idle; > 0 = wave expanding (counts 0→60)
+  };
+
+  // Spell system — each spell collected once; cooldown before reuse
+  const spells = {
+    lumos:     { known: false, active: false, timer: 0, duration: 300,  cooldown: 900,  cooldownTimer: 0 },
+    stupefy:   { known: false, active: false, timer: 0, duration: 0,    cooldown: 1200, cooldownTimer: 0 },
+    alohomora: { known: false, active: false, timer: 0, duration: 0,    cooldown: 1800, cooldownTimer: 0 },
+  };
+  let alohomoraMsg = 0;
+
+  function castSpell(name) {
+    const spell = spells[name];
+    if (!spell.known || spell.cooldownTimer > 0) return;
+    if (name === 'lumos') {
+      spell.active = true;
+      spell.timer = spell.duration;
+      spell.cooldownTimer = spell.cooldown;
+    } else if (name === 'stupefy') {
+      const range = 350;
+      enemies.forEach(e => {
+        if (Math.hypot(player.x - e.x, player.y - e.y) < range) e.stunTimer = 180;
+      });
+      spell.cooldownTimer = spell.cooldown;
+    } else if (name === 'alohomora') {
+      alohomoraMsg = 180;
+      spell.cooldownTimer = spell.cooldown;
+    }
+  }
+
+  // Zone layout helper — place items in a ring around world centre
+  const cx = world.width / 2, cy = world.height / 2;
+
+  const COMMON_ROOM = { x: cx, y: cy, radius: 280, doorWidth: 44 };
+  const DOOR_ANGLES  = [-Math.PI / 2, 0, Math.PI / 2, Math.PI]; // N E S W
+
+  function randomInRing(minR, maxR) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = minR + Math.random() * (maxR - minR);
+    return { x: cx + Math.cos(angle) * dist, y: cy + Math.sin(angle) * dist };
+  }
+  function randomInRingAround(ox, oy, minR, maxR) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = minR + Math.random() * (maxR - minR);
+    return { x: ox + Math.cos(angle) * dist, y: oy + Math.sin(angle) * dist };
+  }
+
+  // Philosopher's Stone — deep in the danger zone
+  const stonePos = randomInRing(5500, 6500);
+  const stone = {
+    x: stonePos.x,
+    y: stonePos.y,
+    radius: 16,
+    collected: false,
+    pulse: 0
+  };
+
+  // COLLECTIBLES — declared before enemies so guardian spawns can reference them
+  const wandPos  = randomInRing(600, 1400);
+  const cloakPos = randomInRing(1800, 3500);
+  const collectibles = [
+    { type: 'wand',  x: wandPos.x,  y: wandPos.y,  collected: false },
+    { type: 'cloak', x: cloakPos.x, y: cloakPos.y, collected: false }
+  ];
+
+  // Health pickups — spread across all zones
+  const healthPickups = [];
+  for (let i = 0; i < 15; i++) {
+    const p = randomInRing(300, 1400);
+    healthPickups.push({ x: p.x, y: p.y, collected: false, visibleWithWandOnly: false });
+  }
+  for (let i = 0; i < 20; i++) {
+    const p = randomInRing(1500, 4500);
+    healthPickups.push({ x: p.x, y: p.y, collected: false, visibleWithWandOnly: false });
+  }
+  for (let i = 0; i < 15; i++) {
+    const p = randomInRing(4500, 7000);
+    healthPickups.push({ x: p.x, y: p.y, collected: false, visibleWithWandOnly: false });
+  }
+
+  // Spell scrolls — one per spell, collected once to unlock permanently
+  const spellScrolls = [
+    { spell: 'lumos',     ...randomInRing(2000, 3500), collected: false },
+    { spell: 'stupefy',   ...randomInRing(3500, 5500), collected: false },
+    { spell: 'alohomora', ...randomInRing(4500, 6500), collected: false },
+  ];
+
+  // Wand upgrades — wand must be active to find them
+  const wandUpgrades = [
+    { level: 2, collected: false, ...randomInRing(2500, 4000) },
+    { level: 3, collected: false, ...randomInRing(4500, 6000) }
+  ];
+
+  // ENEMIES
+  const enemies = [];
+
+  class Enemy {
+    constructor(cfg = {}) {
+      const pos = cfg.spawnPos || randomInRing(1500, 6800);
+      this.x = pos.x;
+      this.y = pos.y;
+
+      // 'guardian' | 'seeker' | 'roamer'
+      this.type = cfg.type ?? 'guardian';
+
+      // Patrol zone (guardian only — centre + ring bounds)
+      this.patrolCx   = cfg.patrolCx   ?? cx;
+      this.patrolCy   = cfg.patrolCy   ?? cy;
+      this.patrolMinR = cfg.patrolMinR ?? 0;
+      this.patrolMaxR = cfg.patrolMaxR ?? 500;
+
+      this.radius         = 14;
+      this.speed          = cfg.speed          ?? 1.2;
+      this.chaseSpeed     = cfg.chaseSpeed     ?? 2.4;
+      this.detectionRange = cfg.detectionRange ?? 250;
+      this.state          = 'patrol'; // 'patrol' | 'chase'
+
+      this.targetX     = this.x;
+      this.targetY     = this.y;
+      this.patrolTimer = 0;
+      this.stunTimer   = 0;
+      this.slowTimer   = 0;
+      this.wobble      = Math.random() * Math.PI * 2;
+    }
+
+    update() {
+      this.wobble += 0.05;
+
+      if (this.stunTimer > 0) { this.stunTimer--; return; }
+
+      this.patrolTimer--;
+
+      const dist = Math.hypot(player.x - this.x, player.y - this.y);
+      const playerHidden = cloakEnabled && hasCloak;
+
+      // All types chase when player is close; return to own mode when far
+      if (!playerHidden && dist < this.detectionRange) {
+        this.state = 'chase';
+      } else if (playerHidden || dist > this.detectionRange * 1.5) {
+        this.state = 'patrol';
+      }
+
+      const spd = this.slowTimer > 0
+        ? (this.state === 'chase' ? this.chaseSpeed : this.speed) * 0.35
+        : (this.state === 'chase' ? this.chaseSpeed : this.speed);
+      if (this.slowTimer > 0) this.slowTimer--;
+
+      if (this.state === 'chase') {
+        const angle = Math.atan2(player.y - this.y, player.x - this.x);
+        this.x += Math.cos(angle) * spd;
+        this.y += Math.sin(angle) * spd;
+      } else if (this.type === 'guardian') {
+        // Patrol waypoints constrained to a ring around a fixed centre
+        const dWay = Math.hypot(this.targetX - this.x, this.targetY - this.y);
+        if (dWay < 10 || this.patrolTimer <= 0) {
+          const wp = randomInRingAround(this.patrolCx, this.patrolCy, this.patrolMinR, this.patrolMaxR);
+          this.targetX = wp.x;
+          this.targetY = wp.y;
+          this.patrolTimer = 200 + Math.random() * 200;
+        }
+        const angle = Math.atan2(this.targetY - this.y, this.targetX - this.x);
+        this.x += Math.cos(angle) * spd;
+        this.y += Math.sin(angle) * spd;
+      } else if (this.type === 'seeker') {
+        // Always drifts slowly toward the player — never truly loses the scent
+        const angle = Math.atan2(player.y - this.y, player.x - this.x);
+        this.x += Math.cos(angle) * spd;
+        this.y += Math.sin(angle) * spd;
+      } else {
+        // Roamer — picks random positions anywhere in the world
+        const dWay = Math.hypot(this.targetX - this.x, this.targetY - this.y);
+        if (dWay < 10 || this.patrolTimer <= 0) {
+          this.targetX = this.radius + Math.random() * (world.width  - this.radius * 2);
+          this.targetY = this.radius + Math.random() * (world.height - this.radius * 2);
+          this.patrolTimer = 120 + Math.random() * 240;
+        }
+        const angle = Math.atan2(this.targetY - this.y, this.targetX - this.x);
+        this.x += Math.cos(angle) * spd;
+        this.y += Math.sin(angle) * spd;
+      }
+
+      this.x = Math.max(this.radius, Math.min(world.width  - this.radius, this.x));
+      this.y = Math.max(this.radius, Math.min(world.height - this.radius, this.y));
+
+      // Cannot enter common room
+      const dRoom = Math.hypot(this.x - cx, this.y - cy);
+      if (dRoom < COMMON_ROOM.radius) {
+        const a = Math.atan2(this.y - cy, this.x - cx);
+        this.x = cx + Math.cos(a) * COMMON_ROOM.radius;
+        this.y = cy + Math.sin(a) * COMMON_ROOM.radius;
+      }
+
+      // Damage player on contact
+      if (!playerHidden && invincibleTimer <= 0 && dist < player.radius + this.radius) {
+        playerHP = Math.max(0, playerHP - 1);
+        invincibleTimer = INVINCIBLE_FRAMES;
+      }
+    }
+
+    draw() {
+      const sx = this.x - camera.x;
+      const sy = this.y - camera.y;
+      ctx.save();
+
+      const pulse = 0.85 + 0.15 * Math.sin(this.wobble);
+      const r = this.radius * pulse;
+      const chasing = this.state === 'chase';
+
+      // Per-type base colours (non-chase)
+      const baseBody  = chasing ? '#5a0000'
+                      : this.type === 'guardian' ? '#1a0033'
+                      : this.type === 'seeker'   ? '#001a22'
+                      :                            '#1a1410';
+      const baseHood  = chasing ? '#ff4444'
+                      : this.type === 'guardian' ? '#6600aa'
+                      : this.type === 'seeker'   ? '#006688'
+                      :                            '#554433';
+      const baseEye   = chasing ? '#ff2200'
+                      : this.type === 'guardian' ? '#aa44ff'
+                      : this.type === 'seeker'   ? '#44ccdd'
+                      :                            '#cc8844';
+      const baseGlow  = chasing ? '#ff0000'
+                      : this.type === 'guardian' ? '#8800ff'
+                      : this.type === 'seeker'   ? '#008899'
+                      :                            '#996633';
+      const auraInner = chasing ? 'rgba(80,0,0,0.95)'
+                      : this.type === 'guardian' ? 'rgba(20,0,40,0.9)'
+                      : this.type === 'seeker'   ? 'rgba(0,20,30,0.9)'
+                      :                            'rgba(18,14,10,0.85)';
+
+      // Aura
+      const grd = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 2.5);
+      grd.addColorStop(0, auraInner);
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r * 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Body
+      ctx.fillStyle = baseBody;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, r * 0.7, r, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Hood highlight
+      ctx.strokeStyle = baseHood;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(sx, sy - r * 0.2, r * 0.55, Math.PI, Math.PI * 2);
+      ctx.stroke();
+
+      // Glowing eyes
+      ctx.fillStyle = baseEye;
+      ctx.shadowColor = baseGlow;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(sx - r * 0.18, sy - r * 0.1, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(sx + r * 0.18, sy - r * 0.1, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Stun ring
+      if (this.stunTimer > 0) {
+        ctx.strokeStyle = `rgba(180,220,255,${0.4 + 0.4 * Math.sin(this.wobble * 3)})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r * 1.8, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+  }
+
+  // --- Enemy spawning ---
+  // Guardians: ring-patrol around each collectible / item
+  // Wand guardians (inner zone)
+  for (let i = 0; i < 3; i++) {
+    enemies.push(new Enemy({
+      type: 'guardian',
+      spawnPos:   randomInRingAround(wandPos.x, wandPos.y, 80, 250),
+      patrolCx: wandPos.x, patrolCy: wandPos.y, patrolMinR: 60, patrolMaxR: 260,
+      speed: 0.8, chaseSpeed: 1.8, detectionRange: 180,
+    }));
+  }
+  // Cloak guardians (mid zone)
+  for (let i = 0; i < 3; i++) {
+    enemies.push(new Enemy({
+      type: 'guardian',
+      spawnPos:   randomInRingAround(cloakPos.x, cloakPos.y, 80, 280),
+      patrolCx: cloakPos.x, patrolCy: cloakPos.y, patrolMinR: 60, patrolMaxR: 300,
+      speed: 1.0, chaseSpeed: 2.0, detectionRange: 210,
+    }));
+  }
+  // Spell scroll guardians — one or two per scroll
+  spellScrolls.forEach(scroll => {
+    const count = scroll.spell === 'alohomora' ? 3 : 2;
+    for (let i = 0; i < count; i++) {
+      enemies.push(new Enemy({
+        type: 'guardian',
+        spawnPos:   randomInRingAround(scroll.x, scroll.y, 80, 300),
+        patrolCx: scroll.x, patrolCy: scroll.y, patrolMinR: 60, patrolMaxR: 320,
+        speed: 1.0 + Math.random() * 0.5, chaseSpeed: 2.2 + Math.random() * 0.4,
+        detectionRange: 200 + Math.random() * 60,
+      }));
+    }
+  });
+  // Wand upgrade guardians
+  wandUpgrades.forEach(upgrade => {
+    for (let i = 0; i < 3; i++) {
+      enemies.push(new Enemy({
+        type: 'guardian',
+        spawnPos:   randomInRingAround(upgrade.x, upgrade.y, 80, 300),
+        patrolCx: upgrade.x, patrolCy: upgrade.y, patrolMinR: 60, patrolMaxR: 320,
+        speed: 1.2 + Math.random() * 0.4, chaseSpeed: 2.4 + Math.random() * 0.4,
+        detectionRange: 220 + Math.random() * 60,
+      }));
+    }
+  });
+  // Stone guardians — tight cluster, fast
+  for (let i = 0; i < 5; i++) {
+    enemies.push(new Enemy({
+      type: 'guardian',
+      spawnPos:   randomInRingAround(stone.x, stone.y, 100, 400),
+      patrolCx: stone.x, patrolCy: stone.y, patrolMinR: 80, patrolMaxR: 450,
+      speed: 1.6, chaseSpeed: 3.2, detectionRange: 320,
+    }));
+  }
+
+  // Seekers: always drifting toward the player, spread across the world
+  for (let i = 0; i < 6; i++) {
+    enemies.push(new Enemy({
+      type: 'seeker',
+      spawnPos:   randomInRing(1500, 7000),
+      speed: 0.5 + Math.random() * 0.4,  // slow drift
+      chaseSpeed: 2.0 + Math.random() * 0.6,
+      detectionRange: 300,
+    }));
+  }
+
+  // Roamers: erratic random walkers spread everywhere
+  for (let i = 0; i < 8; i++) {
+    enemies.push(new Enemy({
+      type: 'roamer',
+      spawnPos:   randomInRing(800, 7000),
+      speed: 1.2 + Math.random() * 0.8,
+      chaseSpeed: 2.2 + Math.random() * 0.6,
+      detectionRange: 220 + Math.random() * 80,
+    }));
+  }
+
+  // --- Floor layer: castle stone flagging ---
+  const patternCanvas = document.createElement('canvas');
+  patternCanvas.width = world.width;
+  patternCanvas.height = world.height;
+  const patternCtx = patternCanvas.getContext('2d');
+
+  // Base stone floor colour
+  patternCtx.fillStyle = '#3a3028';
+  patternCtx.fillRect(0, 0, world.width, world.height);
+
+  // Pseudo-random seeded helper (simple LCG so tiles are deterministic)
+  let _seed = 42;
+  function tileRand() { _seed = (_seed * 1664525 + 1013904223) & 0xffffffff; return (_seed >>> 0) / 0xffffffff; }
+
+  // Draw irregular flagstones in a grid with slight size/colour variation
+  const tileW = 80, tileH = 60;
+  for (let row = 0; row < world.height / tileH + 1; row++) {
+    for (let col = 0; col < world.width / tileW + 1; col++) {
+      const jx = (tileRand() - 0.5) * 10;
+      const jy = (tileRand() - 0.5) * 8;
+      const x = col * tileW + jx;
+      const y = row * tileH + (col % 2 === 0 ? 0 : tileH / 2) + jy;
+      const w = tileW - 4 + (tileRand() - 0.5) * 12;
+      const h = tileH - 4 + (tileRand() - 0.5) * 10;
+      const shade = Math.floor(44 + tileRand() * 28);
+      const r = shade + 6, g = shade, b = shade - 4;
+      patternCtx.fillStyle = `rgb(${r},${g},${b})`;
+      patternCtx.fillRect(x + 2, y + 2, w, h);
+
+      // Mortar shadow on right and bottom edges
+      patternCtx.fillStyle = 'rgba(0,0,0,0.35)';
+      patternCtx.fillRect(x + w, y + 2, 3, h);
+      patternCtx.fillRect(x + 2, y + h, w, 3);
+
+      // Occasional moss patch
+      if (tileRand() < 0.07) {
+        patternCtx.fillStyle = `rgba(40,${60 + Math.floor(tileRand()*40)},20,0.45)`;
+        const mx = x + 4 + tileRand() * (w - 12);
+        const my = y + 4 + tileRand() * (h - 10);
+        patternCtx.beginPath();
+        patternCtx.ellipse(mx, my, 6 + tileRand() * 8, 4 + tileRand() * 5, tileRand() * Math.PI, 0, Math.PI * 2);
+        patternCtx.fill();
+      }
+
+      // Faint highlight on top-left corner of each stone
+      patternCtx.fillStyle = 'rgba(255,240,210,0.06)';
+      patternCtx.fillRect(x + 2, y + 2, w * 0.5, 2);
+      patternCtx.fillRect(x + 2, y + 2, 2, h * 0.4);
+    }
+  }
+
+  // --- Magical starfield layer: world-sized, scrolls with camera, revealed by wand ---
+  const bgCanvas = document.createElement('canvas');
+  bgCanvas.width = world.width;
+  bgCanvas.height = world.height;
+  const bgCtx = bgCanvas.getContext('2d');
+
+  // Deep midnight indigo base across the whole world
+  const bgGrd = bgCtx.createRadialGradient(world.width/2, world.height/2, 0, world.width/2, world.height/2, world.width * 0.6);
+  bgGrd.addColorStop(0, '#0e0820');
+  bgGrd.addColorStop(1, '#04030f');
+  bgCtx.fillStyle = bgGrd;
+  bgCtx.fillRect(0, 0, world.width, world.height);
+
+  // Scatter stars across the full world
+  let _s2 = 99;
+  function bgRand() { _s2 = (_s2 * 1664525 + 1013904223) & 0xffffffff; return (_s2 >>> 0) / 0xffffffff; }
+  for (let i = 0; i < 8000; i++) {
+    const sx = bgRand() * world.width;
+    const sy = bgRand() * world.height;
+    const sr = 0.4 + bgRand() * 1.4;
+    const alpha = 0.3 + bgRand() * 0.65;
+    bgCtx.fillStyle = `rgba(200,190,255,${alpha.toFixed(2)})`;
+    bgCtx.beginPath();
+    bgCtx.arc(sx, sy, sr, 0, Math.PI * 2);
+    bgCtx.fill();
+  }
+
+  function handleInput() {
+    {
+      let dx = 0, dy = 0;
+      if (keys.w) dy -= 1;
+      if (keys.s) dy += 1;
+      if (keys.a) dx -= 1;
+      if (keys.d) dx += 1;
+      if (dx !== 0 || dy !== 0) {
+        playerAngle = Math.atan2(dy, dx);
+        player.x += dx * player.speed / Math.SQRT2 || dx * player.speed;
+        player.y += dy * player.speed / Math.SQRT2 || dy * player.speed;
+        walkFrame += 0.22;
+      } else {
+        walkFrame *= 0.8;
+      }
+      player.x = Math.max(player.radius, Math.min(world.width - player.radius, player.x));
+      player.y = Math.max(player.radius, Math.min(world.height - player.radius, player.y));
+    }
+    if (invincibleTimer > 0) invincibleTimer--;
+    applyCommonRoomCollision();
+  }
+
+  function applyCommonRoomCollision() {
+    const dx = player.x - cx, dy = player.y - cy;
+    const dist = Math.hypot(dx, dy);
+    const wallInner = COMMON_ROOM.radius - 9;
+    const wallOuter = COMMON_ROOM.radius + 9;
+    if (dist > wallInner && dist < wallOuter) {
+      const angle = Math.atan2(dy, dx);
+      const halfGap = Math.asin((COMMON_ROOM.doorWidth / 2) / COMMON_ROOM.radius);
+      const inDoorway = DOOR_ANGLES.some(da => {
+        let diff = Math.abs(angle - da) % (Math.PI * 2);
+        if (diff > Math.PI) diff = Math.PI * 2 - diff;
+        return diff < halfGap;
+      });
+      if (!inDoorway) {
+        player.x = cx + (dx / dist) * wallInner;
+        player.y = cy + (dy / dist) * wallInner;
+      }
+    }
+  }
+
+  function drawCommonRoom() {
+    const rx = COMMON_ROOM.x - camera.x;
+    const ry = COMMON_ROOM.y - camera.y;
+    const R  = COMMON_ROOM.radius;
+    const halfGap = Math.asin((COMMON_ROOM.doorWidth / 2) / R);
+
+    // Subtle warm floor tint inside the room
+    const floorGrd = ctx.createRadialGradient(rx, ry, 0, rx, ry, R);
+    floorGrd.addColorStop(0,   'rgba(255,235,190,0.10)');
+    floorGrd.addColorStop(0.7, 'rgba(255,235,190,0.05)');
+    floorGrd.addColorStop(1,   'rgba(255,235,190,0)');
+    ctx.fillStyle = floorGrd;
+    ctx.beginPath();
+    ctx.arc(rx, ry, R, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Build wall arcs — four segments between doorways
+    // Sort door angles and draw arc from one doorway edge to next
+    const sortedDoors = [...DOOR_ANGLES].sort((a, b) => a - b);
+    ctx.lineCap = 'butt';
+
+    // Outer thick wall
+    ctx.strokeStyle = '#4a3418';
+    ctx.lineWidth = 20;
+    sortedDoors.forEach((da, i) => {
+      const arcStart = da + halfGap;
+      const arcEnd   = sortedDoors[(i + 1) % sortedDoors.length] - halfGap;
+      ctx.beginPath();
+      ctx.arc(rx, ry, R, arcStart, arcEnd);
+      ctx.stroke();
+    });
+
+    // Inner highlight edge
+    ctx.strokeStyle = '#7a5c30';
+    ctx.lineWidth = 4;
+    sortedDoors.forEach((da, i) => {
+      const arcStart = da + halfGap;
+      const arcEnd   = sortedDoors[(i + 1) % sortedDoors.length] - halfGap;
+      ctx.beginPath();
+      ctx.arc(rx, ry, R - 8, arcStart, arcEnd);
+      ctx.stroke();
+    });
+
+    // Doorway post caps
+    ctx.fillStyle = '#4a3418';
+    DOOR_ANGLES.forEach(da => {
+      [-halfGap, halfGap].forEach(offset => {
+        const a = da + offset;
+        ctx.beginPath();
+        ctx.arc(rx + Math.cos(a) * R, ry + Math.sin(a) * R, 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    });
+
+    // Compass labels on doorways
+    const labels = { [-Math.PI / 2]: 'N', 0: 'E', [Math.PI / 2]: 'S', [Math.PI]: 'W' };
+    ctx.font = 'bold 10px serif';
+    ctx.fillStyle = 'rgba(200,170,100,0.7)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    DOOR_ANGLES.forEach(da => {
+      const lx = rx + Math.cos(da) * (R + 18);
+      const ly = ry + Math.sin(da) * (R + 18);
+      ctx.fillText(labels[da], lx, ly);
+    });
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+  }
+
+  function updateCamera() {
+    camera.x = player.x - canvas.width / 2;
+    camera.y = player.y - canvas.height / 2;
+    camera.x = Math.max(0, Math.min(world.width - canvas.width, camera.x));
+    camera.y = Math.max(0, Math.min(world.height - canvas.height, camera.y));
+  }
+
+  function updateFogAnimation() {
+    if (wandEnabled && hasWand) {
+      wandCharge -= 0.0833;
+      if (wandCharge <= 0) { wandCharge = 0; wandEnabled = false; }
+    } else {
+      wandCharge = Math.min(100, wandCharge + 0.1667);
+    }
+    const chargeFactor = wandCharge / 100;
+    const baseTarget = (wandEnabled && hasWand) ? wandRadiusLevels[wandLevel] * chargeFactor : 0;
+    const targetRadius = (spells.lumos.active && hasWand) ? Math.max(baseTarget, 400 * chargeFactor) : baseTarget;
+    currentRadius += (targetRadius - currentRadius) * 0.1;
+  }
+
+  function checkItemPickup() {
+    collectibles.forEach(item => {
+      if (!item.collected) {
+        const dx = player.x - item.x;
+        const dy = player.y - item.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < player.radius + 20) {
+          item.collected = true;
+          if (item.type === "wand") hasWand = true;
+          if (item.type === "cloak") hasCloak = true;
+        }
+      }
+    });
+
+    healthPickups.forEach(pickup => {
+      if (!pickup.collected) {
+        const dist = Math.hypot(player.x - pickup.x, player.y - pickup.y);
+        if (dist < player.radius + 10) {
+          pickup.collected = true;
+          playerHP = Math.min(3, playerHP + 1);
+        }
+      }
+    });
+
+    // Spell scrolls
+    spellScrolls.forEach(scroll => {
+      if (!scroll.collected) {
+        const dist = Math.hypot(player.x - scroll.x, player.y - scroll.y);
+        if (dist < player.radius + 14) {
+          scroll.collected = true;
+          spells[scroll.spell].known = true;
+        }
+      }
+    });
+
+    // Wand upgrades — only pickable when wand is active and in radius
+    wandUpgrades.forEach(upgrade => {
+      if (!upgrade.collected) {
+        const dist = Math.hypot(player.x - upgrade.x, player.y - upgrade.y);
+        if (wandEnabled && dist < currentRadius && dist < player.radius + 20) {
+          upgrade.collected = true;
+          wandLevel = Math.max(wandLevel, upgrade.level);
+        }
+      }
+    });
+
+    // Philosopher's Stone
+    if (!stone.collected) {
+      const dist = Math.hypot(player.x - stone.x, player.y - stone.y);
+      if (dist < player.radius + stone.radius) {
+        stone.collected = true;
+        gameState = 'won';
+      }
+    }
+
+    if (playerHP <= 0) gameState = 'dead';
+  }
+
+
+  function drawWorld() {
+    // Castle floor — always visible as the base
+    ctx.drawImage(patternCanvas, -camera.x, -camera.y);
+
+    // Magical starfield — revealed within wand radius, scrolls with the world
+    if (currentRadius > 1) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(player.x - camera.x, player.y - camera.y, currentRadius, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(bgCanvas, -camera.x, -camera.y);
+      ctx.restore();
+    }
+
+    // Owl companion: scout reveal — circle centred on the owl as it orbits
+    if (playerCompanion === 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(companion.x - camera.x, companion.y - camera.y, 80, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(bgCanvas, -camera.x, -camera.y);
+      ctx.restore();
+    }
+
+    // Castle boundary — aged stone wall outline
+    ctx.strokeStyle = '#6b5030';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(-camera.x, -camera.y, world.width, world.height);
+  }
+
+  function drawCollectibles() {
+    collectibles.forEach(item => {
+      if (item.collected) return;
+      const dist = Math.hypot(player.x - item.x, player.y - item.y);
+      const owlReveal = playerCompanion === 0 && Math.hypot(companion.x - item.x, companion.y - item.y) < 80;
+      // Wand is always visible so the player can find it to start; cloak requires wand
+      if (item.type !== 'wand' && !owlReveal && (!wandEnabled || dist > currentRadius)) return;
+      const sx = item.x - camera.x, sy = item.y - camera.y;
+      ctx.save();
+      if (item.type === 'wand') {
+        // Wand: a thin diagonal stick with a glowing tip
+        ctx.shadowColor = '#88eeff';
+        ctx.shadowBlur = 12;
+        ctx.strokeStyle = '#c8e8ff';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(sx - 9, sy + 9);
+        ctx.lineTo(sx + 7, sy - 7);
+        ctx.stroke();
+        // Handle knob
+        ctx.fillStyle = '#8a5c2a';
+        ctx.beginPath();
+        ctx.arc(sx - 9, sy + 9, 3, 0, Math.PI * 2);
+        ctx.fill();
+        // Tip spark
+        ctx.shadowColor = '#ffffff';
+        ctx.shadowBlur = 16;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(sx + 7, sy - 7, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // Cloak: a simple hood/cape silhouette
+        ctx.shadowColor = '#dd88ff';
+        ctx.shadowBlur = 14;
+        ctx.fillStyle = '#c060e8';
+        // Hood arc (top)
+        ctx.beginPath();
+        ctx.arc(sx, sy - 4, 7, Math.PI, 0);
+        ctx.closePath();
+        ctx.fill();
+        // Cape body (trapezoid)
+        ctx.fillStyle = '#9040c0';
+        ctx.beginPath();
+        ctx.moveTo(sx - 7, sy - 4);
+        ctx.lineTo(sx - 10, sy + 9);
+        ctx.lineTo(sx + 10, sy + 9);
+        ctx.lineTo(sx + 7, sy - 4);
+        ctx.closePath();
+        ctx.fill();
+        // Clasp dot
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#ffe0ff';
+        ctx.beginPath();
+        ctx.arc(sx, sy - 1, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    });
+  }
+
+  // Reusable wizard figure — called by drawPlayer and sorting menu previews
+  function drawWizardFigure(c, x, y, scale, houseIdx, showWand) {
+    const h = HOUSES[houseIdx] || HOUSES[0];
+    const s = scale;
+    c.save();
+    c.translate(x, y);
+    c.scale(s, s);
+
+    const legSwing = Math.sin(walkFrame) * 5;
+
+    // Shadow
+    c.fillStyle = 'rgba(0,0,0,0.25)';
+    c.beginPath();
+    c.ellipse(0, 8, 10, 5, 0, 0, Math.PI * 2);
+    c.fill();
+
+    // Legs
+    c.fillStyle = h.robeDark;
+    c.beginPath(); c.ellipse(-4, 12 + legSwing, 3, 5, 0, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.ellipse(4, 12 - legSwing, 3, 5, 0, 0, Math.PI * 2); c.fill();
+
+    // Robe body
+    c.fillStyle = h.robe;
+    c.beginPath(); c.ellipse(0, 3, 9, 11, 0, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = h.trim;
+    c.lineWidth = 1.5;
+    c.beginPath(); c.ellipse(0, 3, 9, 11, 0, 0, Math.PI * 2); c.stroke();
+
+    // Wand arm
+    if (showWand) {
+      c.strokeStyle = '#c8e8ff';
+      c.lineWidth = 2; c.lineCap = 'round';
+      c.shadowColor = '#88eeff'; c.shadowBlur = 6;
+      c.beginPath(); c.moveTo(8, -1); c.lineTo(15, -8); c.stroke();
+      c.shadowBlur = 0;
+      c.fillStyle = '#ffffff';
+      c.shadowColor = '#ffffff'; c.shadowBlur = 8;
+      c.beginPath(); c.arc(15, -8, 2, 0, Math.PI * 2); c.fill();
+      c.shadowBlur = 0;
+    }
+
+    // Head
+    c.fillStyle = '#f5c5a0';
+    c.beginPath(); c.arc(0, -7, 7, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#2a1000';
+    c.beginPath(); c.arc(0, -10, 1.5, 0, Math.PI * 2); c.fill();
+
+    // Hat brim + cone
+    c.fillStyle = h.hat;
+    c.beginPath(); c.ellipse(0, -13, 8, 2.5, 0, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.moveTo(-5, -13); c.lineTo(5, -13); c.lineTo(0, -27); c.closePath(); c.fill();
+
+    c.restore();
+  }
+
+  function drawPlayer() {
+    const px = player.x - camera.x;
+    const py = player.y - camera.y;
+    const alpha = (cloakEnabled && hasCloak) ? 0.35 :
+                  (invincibleTimer > 0 ? 0.3 + 0.7 * Math.abs(Math.sin(invincibleTimer * 0.3)) : 1.0);
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(px, py);
+    ctx.rotate(playerAngle + Math.PI / 2);
+    drawWizardFigure(ctx, 0, 0, 1, playerHouse, wandEnabled && hasWand);
+    ctx.restore();
+  }
+
+  function drawSortingMenu() {
+    // Dark castle background
+    ctx.fillStyle = '#07050f';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Subtle star scatter
+    ctx.fillStyle = 'rgba(200,190,255,0.35)';
+    for (let i = 0; i < 120; i++) {
+      const sx = ((i * 137 + 11) % canvas.width);
+      const sy = ((i * 97  + 31) % canvas.height);
+      ctx.beginPath(); ctx.arc(sx, sy, 0.8, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Central parchment panel
+    const panelW = Math.min(760, canvas.width - 60);
+    const panelH = 440;
+    const panelX = (canvas.width - panelW) / 2;
+    const panelY = (canvas.height - panelH) / 2;
+    const pr = 14;
+
+    const pg = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
+    pg.addColorStop(0, '#f5e8c0');
+    pg.addColorStop(1, '#c9a455');
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 28;
+    ctx.fillStyle = pg;
+    ctx.beginPath();
+    ctx.moveTo(panelX + pr, panelY);
+    ctx.lineTo(panelX + panelW - pr, panelY);
+    ctx.quadraticCurveTo(panelX + panelW, panelY, panelX + panelW, panelY + pr);
+    ctx.lineTo(panelX + panelW, panelY + panelH - pr);
+    ctx.quadraticCurveTo(panelX + panelW, panelY + panelH, panelX + panelW - pr, panelY + panelH);
+    ctx.lineTo(panelX + pr, panelY + panelH);
+    ctx.quadraticCurveTo(panelX, panelY + panelH, panelX, panelY + panelH - pr);
+    ctx.lineTo(panelX, panelY + pr);
+    ctx.quadraticCurveTo(panelX, panelY, panelX + pr, panelY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#7a5010';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Title
+    ctx.textAlign = 'center';
+    ctx.font = 'italic bold 36px serif';
+    ctx.fillStyle = '#7a3800';
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 6;
+    ctx.fillText('The Sorting Ceremony', canvas.width / 2, panelY + 52);
+    ctx.shadowBlur = 0;
+
+    // Divider
+    ctx.strokeStyle = 'rgba(90,58,0,0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 40, panelY + 64);
+    ctx.lineTo(panelX + panelW - 40, panelY + 64);
+    ctx.stroke();
+
+    // Subtitle
+    ctx.font = 'italic 15px serif';
+    ctx.fillStyle = '#5a3000';
+    ctx.fillText('The Sorting Hat awaits your choice.', canvas.width / 2, panelY + 88);
+
+    // House cards
+    const cardW = 148;
+    const cardH = 210;
+    const cardGap = (panelW - 4 * cardW - 80) / 3;
+    const cardsStartX = panelX + 40;
+    const cardY = panelY + 110;
+
+    HOUSES.forEach((house, i) => {
+      const cx = cardsStartX + i * (cardW + cardGap);
+      const hovered = hoveredHouse === i;
+      const lift = hovered ? -6 : 0;
+
+      // Card background
+      const cg = ctx.createLinearGradient(cx, cardY + lift, cx, cardY + cardH + lift);
+      cg.addColorStop(0, hovered ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)');
+      cg.addColorStop(1, 'rgba(0,0,0,0.08)');
+      ctx.fillStyle = cg;
+      const cr = 8;
+      ctx.beginPath();
+      ctx.moveTo(cx + cr, cardY + lift);
+      ctx.lineTo(cx + cardW - cr, cardY + lift);
+      ctx.quadraticCurveTo(cx + cardW, cardY + lift, cx + cardW, cardY + lift + cr);
+      ctx.lineTo(cx + cardW, cardY + cardH + lift - cr);
+      ctx.quadraticCurveTo(cx + cardW, cardY + cardH + lift, cx + cardW - cr, cardY + cardH + lift);
+      ctx.lineTo(cx + cr, cardY + cardH + lift);
+      ctx.quadraticCurveTo(cx, cardY + cardH + lift, cx, cardY + cardH + lift - cr);
+      ctx.lineTo(cx, cardY + lift + cr);
+      ctx.quadraticCurveTo(cx, cardY + lift, cx + cr, cardY + lift);
+      ctx.closePath();
+      ctx.fill();
+
+      // Card border
+      ctx.strokeStyle = hovered ? house.accent : house.trim;
+      ctx.lineWidth = hovered ? 2.5 : 1.5;
+      ctx.stroke();
+
+      // House name
+      ctx.font = 'bold 13px serif';
+      ctx.fillStyle = house.accent;
+      ctx.shadowColor = 'rgba(0,0,0,0.4)';
+      ctx.shadowBlur = 4;
+      ctx.fillText(house.name, cx + cardW / 2, cardY + lift + 22);
+      ctx.shadowBlur = 0;
+
+      // Wizard figure preview (upright, facing up)
+      const figX = cx + cardW / 2;
+      const figY = cardY + lift + 130;
+      drawWizardFigure(ctx, figX, figY, 1.9, i, false);
+
+      // Key hint
+      ctx.font = '11px serif';
+      ctx.fillStyle = 'rgba(60,35,0,0.7)';
+      ctx.fillText(`Press ${i + 1}`, cx + cardW / 2, cardY + cardH + lift - 10);
+    });
+
+    // Bottom hint
+    ctx.font = 'italic 13px serif';
+    ctx.fillStyle = 'rgba(60,35,0,0.6)';
+    ctx.fillText('Click a house or press 1 – 4 to begin', canvas.width / 2, panelY + panelH - 14);
+    ctx.textAlign = 'left';
+
+    // Controls legend — strip below the main panel
+    const legW = Math.min(560, canvas.width - 60);
+    const legX = (canvas.width - legW) / 2;
+    const legY = panelY + panelH + 18;
+    const legH = 90;
+    const legR = 8;
+    const lg = ctx.createLinearGradient(legX, legY, legX, legY + legH);
+    lg.addColorStop(0, 'rgba(245,232,192,0.82)');
+    lg.addColorStop(1, 'rgba(201,164,85,0.82)');
+    ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 12;
+    ctx.fillStyle = lg;
+    ctx.beginPath();
+    ctx.moveTo(legX + legR, legY);
+    ctx.lineTo(legX + legW - legR, legY);
+    ctx.quadraticCurveTo(legX + legW, legY, legX + legW, legY + legR);
+    ctx.lineTo(legX + legW, legY + legH - legR);
+    ctx.quadraticCurveTo(legX + legW, legY + legH, legX + legW - legR, legY + legH);
+    ctx.lineTo(legX + legR, legY + legH);
+    ctx.quadraticCurveTo(legX, legY + legH, legX, legY + legH - legR);
+    ctx.lineTo(legX, legY + legR);
+    ctx.quadraticCurveTo(legX, legY, legX + legR, legY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(122,80,16,0.5)'; ctx.lineWidth = 1.5; ctx.stroke();
+
+    // Legend title
+    ctx.textAlign = 'center';
+    ctx.font = 'italic bold 11px serif';
+    ctx.fillStyle = '#5a3000';
+    ctx.fillText('Controls', canvas.width / 2, legY + 16);
+
+    // Divider
+    ctx.strokeStyle = 'rgba(90,58,0,0.25)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(legX + 30, legY + 22); ctx.lineTo(legX + legW - 30, legY + 22);
+    ctx.stroke();
+
+    // Two-column controls grid
+    const controls = [
+      ['WASD', 'Move'],
+      ['E', 'Toggle wand'],
+      ['Q', 'Toggle cloak'],
+      ['Z', 'Cast Lumos'],
+      ['X', 'Cast Stupefy'],
+      ['C', 'Cast Alohomora'],
+      ['P / Esc', 'Pause'],
+    ];
+    ctx.font = '11px serif';
+    const colW = legW / 2 - 20;
+    const colStartY = legY + 32;
+    const rowH = 13;
+    controls.forEach((row, i) => {
+      const col = i % 2;
+      const rowNum = Math.floor(i / 2);
+      const tx = legX + 20 + col * (legW / 2);
+      const ty = colStartY + rowNum * rowH;
+      ctx.font = 'bold 11px serif';
+      ctx.fillStyle = '#3a1e00';
+      ctx.textAlign = 'left';
+      ctx.fillText(row[0], tx, ty);
+      const keyW = ctx.measureText(row[0]).width;
+      ctx.font = '11px serif';
+      ctx.fillStyle = 'rgba(60,35,0,0.65)';
+      ctx.fillText('— ' + row[1], tx + keyW + 4, ty);
+    });
+    ctx.textAlign = 'left';
+  }
+
+  function drawCompanionMenu() {
+    // Same dark background as sorting menu
+    ctx.fillStyle = '#07050f';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(200,190,255,0.35)';
+    for (let i = 0; i < 120; i++) {
+      ctx.beginPath();
+      ctx.arc(((i*173+17)%canvas.width), ((i*113+41)%canvas.height), 0.8, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    const panelW = Math.min(660, canvas.width - 60);
+    const panelH = 400;
+    const panelX = (canvas.width - panelW) / 2;
+    const panelY = (canvas.height - panelH) / 2;
+    const pr = 14;
+
+    const pg = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
+    pg.addColorStop(0, '#f5e8c0'); pg.addColorStop(1, '#c9a455');
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 28;
+    ctx.fillStyle = pg;
+    ctx.beginPath();
+    ctx.moveTo(panelX + pr, panelY);
+    ctx.lineTo(panelX + panelW - pr, panelY);
+    ctx.quadraticCurveTo(panelX + panelW, panelY, panelX + panelW, panelY + pr);
+    ctx.lineTo(panelX + panelW, panelY + panelH - pr);
+    ctx.quadraticCurveTo(panelX + panelW, panelY + panelH, panelX + panelW - pr, panelY + panelH);
+    ctx.lineTo(panelX + pr, panelY + panelH);
+    ctx.quadraticCurveTo(panelX, panelY + panelH, panelX, panelY + panelH - pr);
+    ctx.lineTo(panelX, panelY + pr);
+    ctx.quadraticCurveTo(panelX, panelY, panelX + pr, panelY);
+    ctx.closePath(); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#7a5010'; ctx.lineWidth = 2; ctx.stroke();
+
+    // Title
+    ctx.textAlign = 'center';
+    ctx.font = 'italic bold 32px serif';
+    ctx.fillStyle = '#7a3800';
+    ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 6;
+    ctx.fillText('Choose Your Companion', canvas.width / 2, panelY + 50);
+    ctx.shadowBlur = 0;
+
+    ctx.strokeStyle = 'rgba(90,58,0,0.4)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 40, panelY + 62); ctx.lineTo(panelX + panelW - 40, panelY + 62);
+    ctx.stroke();
+
+    ctx.font = 'italic 14px serif'; ctx.fillStyle = '#5a3000';
+    ctx.fillText('Your companion will follow you through Hogwarts.', canvas.width / 2, panelY + 84);
+
+    // Companion cards — 3 across
+    const cardW = 160, cardH = 220;
+    const totalCardsW = 3 * cardW + 2 * 24;
+    const cardsStartX = (canvas.width - totalCardsW) / 2;
+    const cardY = panelY + 104;
+
+    COMPANIONS.forEach((comp, i) => {
+      const cx = cardsStartX + i * (cardW + 24);
+      const hovered = hoveredCompanion === i;
+      const lift = hovered ? -6 : 0;
+
+      const cg = ctx.createLinearGradient(cx, cardY + lift, cx, cardY + cardH + lift);
+      cg.addColorStop(0, hovered ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)');
+      cg.addColorStop(1, 'rgba(0,0,0,0.08)');
+      ctx.fillStyle = cg;
+      const cr2 = 8;
+      ctx.beginPath();
+      ctx.moveTo(cx + cr2, cardY + lift);
+      ctx.lineTo(cx + cardW - cr2, cardY + lift);
+      ctx.quadraticCurveTo(cx + cardW, cardY + lift, cx + cardW, cardY + lift + cr2);
+      ctx.lineTo(cx + cardW, cardY + cardH + lift - cr2);
+      ctx.quadraticCurveTo(cx + cardW, cardY + cardH + lift, cx + cardW - cr2, cardY + cardH + lift);
+      ctx.lineTo(cx + cr2, cardY + cardH + lift);
+      ctx.quadraticCurveTo(cx, cardY + cardH + lift, cx, cardY + cardH + lift - cr2);
+      ctx.lineTo(cx, cardY + lift + cr2);
+      ctx.quadraticCurveTo(cx, cardY + lift, cx + cr2, cardY + lift);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = hovered ? comp.color : 'rgba(90,58,0,0.5)';
+      ctx.lineWidth = hovered ? 2.5 : 1.5; ctx.stroke();
+
+      // Name
+      ctx.font = 'bold 15px serif'; ctx.fillStyle = comp.color;
+      ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 3;
+      ctx.fillText(comp.name, cx + cardW / 2, cardY + lift + 24);
+      ctx.shadowBlur = 0;
+
+      // Animal figure
+      comp.draw(ctx, cx + cardW / 2, cardY + lift + 105, 1.8);
+
+      // Ability hint — two lines
+      const lines = comp.hint.split('\n');
+      ctx.font = 'italic 10px serif'; ctx.fillStyle = '#5a3000';
+      lines.forEach((line, li) => {
+        ctx.fillText(line, cx + cardW / 2, cardY + cardH + lift - 32 + li * 14);
+      });
+
+      // Key hint
+      ctx.font = '11px serif'; ctx.fillStyle = 'rgba(60,35,0,0.65)';
+      ctx.fillText(`Press ${i + 1}`, cx + cardW / 2, cardY + cardH + lift - 8);
+    });
+
+    ctx.font = 'italic 13px serif'; ctx.fillStyle = 'rgba(60,35,0,0.6)';
+    ctx.fillText('A / D to navigate  ·  Enter to confirm', canvas.width / 2, panelY + panelH - 14);
+    ctx.textAlign = 'left';
+  }
+
+  function drawHUD() {
+    const pad = 20;
+    const miniX = pad + 95;
+    const miniY = canvas.height - pad - 140;
+    const radius = 70;
+    // Player-centred zoom: world viewport radius shown on minimap
+    const viewR = 2000; // world px visible from centre to edge
+    const scale = radius / viewR;
+    // Convert world coord → minimap screen coord (player-centred)
+    const miniPos = (wx, wy) => ({
+      x: miniX + (wx - player.x) * scale,
+      y: miniY + (wy - player.y) * scale,
+    });
+    const er = 22; // emblem radius
+
+    // Helper: draw a circular parchment emblem
+    function drawEmblem(ex, ey, label, drawContent) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.4)';
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetY = 2;
+      const eg = ctx.createRadialGradient(ex - er * 0.3, ey - er * 0.3, 1, ex, ey, er);
+      eg.addColorStop(0,   '#f5e8c0');
+      eg.addColorStop(0.6, '#d4a84b');
+      eg.addColorStop(1,   '#8b6010');
+      ctx.fillStyle = eg;
+      ctx.beginPath(); ctx.arc(ex, ey, er, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = '#7a5010';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ex, ey, er, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(90,58,0,0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(ex, ey, er - 4, 0, Math.PI * 2); ctx.stroke();
+      // Label along the top inner edge
+      ctx.font = 'italic 7px serif';
+      ctx.fillStyle = 'rgba(60,35,0,0.95)';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, ex, ey - er + 10);
+      drawContent(ex, ey);
+    }
+
+    // --- Marauder's Map circle ---
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(miniX, miniY, radius, 0, Math.PI * 2);
+    ctx.clip();
+
+    const parchGrd = ctx.createRadialGradient(miniX, miniY, 0, miniX, miniY, radius);
+    parchGrd.addColorStop(0,   '#e8d5a3');
+    parchGrd.addColorStop(0.7, '#c9a96e');
+    parchGrd.addColorStop(1,   '#8b6914');
+    ctx.fillStyle = parchGrd;
+    ctx.fillRect(miniX - radius, miniY - radius, radius * 2, radius * 2);
+
+    ctx.strokeStyle = 'rgba(80,50,10,0.18)';
+    ctx.lineWidth = 0.5;
+    for (let gx = miniX - radius; gx < miniX + radius; gx += 12) {
+      ctx.beginPath(); ctx.moveTo(gx, miniY - radius); ctx.lineTo(gx, miniY + radius); ctx.stroke();
+    }
+    for (let gy = miniY - radius; gy < miniY + radius; gy += 12) {
+      ctx.beginPath(); ctx.moveTo(miniX - radius, gy); ctx.lineTo(miniX + radius, gy); ctx.stroke();
+    }
+
+    collectibles.forEach(item => {
+      if (item.collected) return;
+      const m = miniPos(item.x, item.y);
+      ctx.strokeStyle = item.type === "wand" ? '#1a6b3a' : '#6b1a5a';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(m.x - 3, m.y); ctx.lineTo(m.x + 3, m.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(m.x, m.y - 3); ctx.lineTo(m.x, m.y + 3); ctx.stroke();
+    });
+
+    // Common room walls on minimap
+    const crm = miniPos(COMMON_ROOM.x, COMMON_ROOM.y);
+    const crR = COMMON_ROOM.radius * scale;
+    const halfGap = Math.asin((COMMON_ROOM.doorWidth / 2) / COMMON_ROOM.radius);
+    const sortedDoors = [...DOOR_ANGLES].sort((a, b) => a - b);
+    ctx.strokeStyle = '#4a3418';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'butt';
+    sortedDoors.forEach((da, i) => {
+      const arcStart = da + halfGap;
+      const arcEnd   = sortedDoors[(i + 1) % sortedDoors.length] - halfGap;
+      ctx.beginPath();
+      ctx.arc(crm.x, crm.y, crR, arcStart, arcEnd);
+      ctx.stroke();
+    });
+    // Door posts
+    ctx.fillStyle = '#4a3418';
+    DOOR_ANGLES.forEach(da => {
+      [-halfGap, halfGap].forEach(offset => {
+        const a = da + offset;
+        ctx.beginPath();
+        ctx.arc(crm.x + Math.cos(a) * crR, crm.y + Math.sin(a) * crR, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    });
+
+    enemies.forEach(e => {
+      const m = miniPos(e.x, e.y);
+      ctx.fillStyle = e.state === 'chase' ? '#cc0000' : '#8b0000';
+      ctx.beginPath(); ctx.arc(m.x, m.y, 2.5, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // Cat companion: pulsing golden dot for nearest uncollected item
+    if (playerCompanion === 1 && companion.catTarget) {
+      const m = miniPos(companion.catTarget.x, companion.catTarget.y);
+      const pulse = 0.5 + 0.5 * Math.sin(companion.catPulse);
+      const dotR = 3.5 + pulse * 2;
+      const alpha = 0.55 + pulse * 0.45;
+      ctx.fillStyle = `rgba(255,215,50,${alpha})`;
+      ctx.beginPath(); ctx.arc(m.x, m.y, dotR, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = `rgba(255,240,120,${alpha * 0.6})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(m.x, m.y, dotR + 3, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.translate(miniX, miniY);
+    ctx.rotate(playerAngle + Math.PI / 2);
+    ctx.fillStyle = '#2c1a00';
+    ctx.beginPath(); ctx.ellipse(-1.5, -2, 1.5, 2.5, -0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse( 1.5,  2, 1.5, 2.5,  0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
+
+    // Map border ring
+    const borderGrd = ctx.createLinearGradient(miniX - radius, miniY - radius, miniX + radius, miniY + radius);
+    borderGrd.addColorStop(0, '#6b4c11');
+    borderGrd.addColorStop(1, '#3d2800');
+    ctx.strokeStyle = borderGrd;
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(miniX, miniY, radius, 0, Math.PI * 2); ctx.stroke();
+
+    // "Marauder's Map" curved below all spell emblems
+    const arcText = "Marauder's Map";
+    const arcR = radius + er * 2 + 20;
+    ctx.font = 'italic bold 9px serif';
+    ctx.fillStyle = '#c8960c';
+    ctx.shadowColor = '#ffe066';
+    ctx.shadowBlur = 4;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const totalWidth = arcText.split('').reduce((w, ch) => w + ctx.measureText(ch).width, 0);
+    const totalAngle = totalWidth / arcR;
+    // Start from the left end of the text, walking rightward along the bottom
+    let charAngle = Math.PI / 2 + totalAngle / 2;
+    for (const ch of arcText) {
+      const cw = ctx.measureText(ch).width;
+      charAngle -= cw / (arcR * 2);
+      ctx.save();
+      ctx.translate(miniX + arcR * Math.cos(charAngle), miniY + arcR * Math.sin(charAngle));
+      ctx.rotate(charAngle - Math.PI / 2);
+      ctx.fillText(ch, 0, 0);
+      ctx.restore();
+      charAngle -= cw / (arcR * 2);
+    }
+    ctx.shadowBlur = 0;
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+
+    // --- Compass emblems + labels ---
+
+    // NORTH — Lives
+    const ny = miniY - radius;
+    drawEmblem(miniX, ny, 'Lives', (ex, ey) => {
+      ctx.textAlign = 'center';
+      ctx.font = '11px serif';
+      ctx.fillStyle = playerHP > 1 ? '#991133' : '#cc0000';
+      ctx.fillText('♥'.repeat(playerHP) + '♡'.repeat(3 - playerHP), ex, ey + 7);
+    });
+
+    // EAST — Wand
+    const ex2 = miniX + radius;
+    drawEmblem(ex2, miniY, 'Wand', (ex, ey) => {
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 11px serif';
+      ctx.fillStyle = wandEnabled ? '#1a5c2a' : '#3d1a00';
+      ctx.fillText('✦', ex, ey + 2);
+      ctx.font = '8px serif';
+      ctx.fillStyle = '#2a1000';
+      ctx.fillText(!hasWand ? 'none' : (wandEnabled ? `lv${wandLevel}` : 'off'), ex, ey + 13);
+      // Charge arc — white outline tracing the emblem border, shrinks as charge drains
+      if (hasWand) {
+        const arcAngle = (wandCharge / 100) * Math.PI * 2;
+        ctx.strokeStyle = wandEnabled ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.45)';
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(ex, ey, er - 1, -Math.PI / 2, -Math.PI / 2 + arcAngle);
+        ctx.stroke();
+      }
+    });
+
+    // WEST — Cloak
+    const wx = miniX - radius;
+    drawEmblem(wx, miniY, 'Cloak', (ex, ey) => {
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 13px serif';
+      ctx.fillStyle = cloakEnabled ? '#2255aa' : '#3d1a00';
+      ctx.fillText(hasCloak ? (cloakEnabled ? '👁' : '◎') : '○', ex, ey + 8);
+    });
+
+    // --- Spell emblems — arc along the bottom of the minimap circle ---
+    const spellDefs = [
+      { key: 'Z', id: 'lumos',     label: 'Lumos',     color: '#c8960c', glow: '#ffe066' },
+      { key: 'X', id: 'stupefy',   label: 'Stupefy',   color: '#4499cc', glow: '#88ccff' },
+      { key: 'C', id: 'alohomora', label: 'Alohomora', color: '#44aa66', glow: '#aaffcc' },
+    ];
+    // Angles: Lumos at ~7 o'clock (210°), Stupefy at 6 o'clock (90°=bottom), Alohomora at ~5 o'clock (330°→-30°)
+    const spellAngles = [Math.PI * 0.72, Math.PI * 0.5, Math.PI * 0.28];
+    const spellOrbitR = radius + er + 4; // just outside the map ring
+    spellDefs.forEach((def, i) => {
+      const s = spells[def.id];
+      const angle = spellAngles[i];
+      const ex = miniX + Math.cos(angle) * spellOrbitR;
+      const ey = miniY + Math.sin(angle) * spellOrbitR;
+      const ready = s.known && s.cooldownTimer === 0 && !s.active;
+      const active = s.active;
+
+      drawEmblem(ex, ey, def.label, (ex2, ey2) => {
+        // Key badge letter
+        ctx.textAlign = 'center';
+        ctx.font = `bold 10px serif`;
+        ctx.fillStyle = s.known ? def.color : 'rgba(60,35,0,0.35)';
+        ctx.fillText(def.key, ex2, ey2 + 4);
+
+        // Cooldown / active arc border
+        if (s.known) {
+          let arcFraction;
+          if (active) {
+            arcFraction = s.timer / s.duration; // shrinks as active timer drains
+          } else if (s.cooldownTimer > 0) {
+            arcFraction = 1 - s.cooldownTimer / s.cooldown; // grows as cooldown refills
+          } else {
+            arcFraction = 1; // full — ready
+          }
+          const arcAngle = arcFraction * Math.PI * 2;
+          ctx.strokeStyle = ready ? `rgba(255,255,255,0.9)` :
+                            active ? `rgba(255,255,180,0.9)` :
+                                     `rgba(255,255,255,0.3)`;
+          ctx.lineWidth = 2.5;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.arc(ex2, ey2, er - 1, -Math.PI / 2, -Math.PI / 2 + arcAngle);
+          ctx.stroke();
+        }
+      });
+    });
+
+    ctx.textAlign = 'left';
+  }
+
+  function drawSpellScrolls() {
+    const scrollColors = { lumos: '#ffe066', stupefy: '#66aaff', alohomora: '#aaffaa' };
+    spellScrolls.forEach(scroll => {
+      if (scroll.collected) return;
+      const dist = Math.hypot(player.x - scroll.x, player.y - scroll.y);
+      const catReveal = playerCompanion === 1 && companion.catPulseTimer > 0 && dist < 250;
+      const sx = scroll.x - camera.x, sy = scroll.y - camera.y;
+      ctx.save();
+      ctx.shadowColor = scrollColors[scroll.spell];
+      ctx.shadowBlur = catReveal ? 22 : 10;
+      if (catReveal) ctx.globalAlpha = 0.5 + 0.5 * (companion.catPulseTimer / 60);
+      ctx.fillStyle = scrollColors[scroll.spell];
+      ctx.font = 'bold 11px serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('📜', sx, sy + 4);
+      ctx.font = '7px serif';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(scroll.spell[0].toUpperCase() + scroll.spell.slice(1), sx, sy + 16);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+    // Wand upgrades
+    wandUpgrades.forEach(upgrade => {
+      if (upgrade.collected) return;
+      const dist = Math.hypot(player.x - upgrade.x, player.y - upgrade.y);
+      const catReveal = playerCompanion === 1 && companion.catPulseTimer > 0 && dist < 250;
+      const owlReveal = playerCompanion === 0 && Math.hypot(companion.x - upgrade.x, companion.y - upgrade.y) < 80;
+      if (!catReveal && !owlReveal && (!wandEnabled || dist > currentRadius)) return;
+      const sx = upgrade.x - camera.x, sy = upgrade.y - camera.y;
+      ctx.save();
+      ctx.shadowColor = '#aaddff';
+      ctx.shadowBlur = catReveal ? 22 : 12;
+      if (catReveal) ctx.globalAlpha = 0.5 + 0.5 * (companion.catPulseTimer / 60);
+      ctx.font = 'bold 13px serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#aaddff';
+      ctx.fillText('✦', sx, sy + 5);
+      ctx.font = '7px serif';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(`Wand Lv${upgrade.level}`, sx, sy + 16);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+    ctx.textAlign = 'left';
+  }
+
+  function drawHealthPickups() {
+    healthPickups.forEach(pickup => {
+      if (pickup.collected) return;
+      const inRadius = Math.hypot(player.x - pickup.x, player.y - pickup.y) < currentRadius;
+      if (pickup.visibleWithWandOnly && !(wandEnabled && inRadius)) return;
+      ctx.font = '10px serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#cc1133';
+      ctx.shadowColor = '#ff4466';
+      ctx.shadowBlur = 4;
+      ctx.fillText('♥', pickup.x - camera.x, pickup.y - camera.y + 4);
+      ctx.shadowBlur = 0;
+    });
+    ctx.textAlign = 'left';
+  }
+
+
+  function drawStone() {
+    if (stone.collected) return;
+    stone.pulse += 0.04;
+    const sx = stone.x - camera.x;
+    const sy = stone.y - camera.y;
+
+    // Only visible when wand is active and in radius
+    const dist = Math.hypot(player.x - stone.x, player.y - stone.y);
+    const owlReveal = playerCompanion === 0 && Math.hypot(companion.x - stone.x, companion.y - stone.y) < 80;
+    if (!owlReveal && (!wandEnabled || dist > currentRadius)) return;
+
+    const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, stone.radius * 2.5);
+    glow.addColorStop(0, 'rgba(255,80,20,0.9)');
+    glow.addColorStop(0.5, 'rgba(200,30,0,0.5)');
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(sx, sy, stone.radius * 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    const pulse = 0.88 + 0.12 * Math.sin(stone.pulse);
+    ctx.fillStyle = '#cc2200';
+    ctx.shadowColor = '#ff4400';
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.arc(sx, sy, stone.radius * pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = 'rgba(255,180,100,0.6)';
+    ctx.beginPath();
+    ctx.ellipse(sx - stone.radius * 0.3, sy - stone.radius * 0.3, stone.radius * 0.25, stone.radius * 0.15, -0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 9px serif';
+    ctx.textAlign = 'center';
+    ctx.fillText("Philosopher's Stone", sx, sy + stone.radius + 14);
+    ctx.textAlign = 'left';
+  }
+
+  function drawPauseScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 48px serif';
+    ctx.fillStyle = '#ffd700';
+    ctx.shadowColor = '#ffaa00';
+    ctx.shadowBlur = 20;
+    ctx.fillText('Paused', canvas.width / 2, canvas.height / 2 - 20);
+    ctx.shadowBlur = 0;
+    ctx.font = '16px serif';
+    ctx.fillStyle = '#ccc';
+    ctx.fillText('Press P or Escape to resume', canvas.width / 2, canvas.height / 2 + 24);
+    ctx.textAlign = 'left';
+  }
+
+  function drawEndScreen() {
+    const won = gameState === 'won';
+    ctx.fillStyle = won ? 'rgba(10,30,10,0.88)' : 'rgba(30,0,0,0.88)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.textAlign = 'center';
+
+    ctx.font = 'bold 52px serif';
+    ctx.fillStyle = won ? '#ffd700' : '#ff3333';
+    ctx.shadowColor = won ? '#ffaa00' : '#ff0000';
+    ctx.shadowBlur = 24;
+    ctx.fillText(won ? "You Found the Stone!" : "Caught by a Dementor", canvas.width / 2, canvas.height / 2 - 40);
+    ctx.shadowBlur = 0;
+
+    ctx.font = '22px serif';
+    ctx.fillStyle = '#ddd';
+    ctx.fillText(won ? "The Stone is yours!" : "The darkness took you.", canvas.width / 2, canvas.height / 2 + 20);
+
+    ctx.font = '16px serif';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText("Press R to play again", canvas.width / 2, canvas.height / 2 + 60);
+    ctx.textAlign = 'left';
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (gameState === 'menu') { drawSortingMenu(); return; }
+    if (gameState === 'companion') { drawCompanionMenu(); return; }
+    drawWorld();
+    drawCommonRoom();
+    drawCollectibles();
+    drawSpellScrolls();
+    drawStone();
+    enemies.forEach(e => e.draw());
+    drawPlayer();
+    drawCompanion();
+    drawHUD();
+    drawHealthPickups();
+    if (gameState === 'won' || gameState === 'dead') drawEndScreen();
+    if (gameState === 'paused') drawPauseScreen();
+  }
+
+  function updateCompanion() {
+    if (playerCompanion === 0) {
+      // Owl: orbits the player at ~110px, drifting angle slowly with slight wobble
+      companion.owlAngle += 0.007 + 0.002 * Math.sin(companion.owlAngle * 3);
+      const orbitR = 200;
+      const targetX = player.x + Math.cos(companion.owlAngle) * orbitR;
+      const targetY = player.y + Math.sin(companion.owlAngle) * orbitR;
+      companion.x += (targetX - companion.x) * 0.06;
+      companion.y += (targetY - companion.y) * 0.06;
+    } else {
+      // Cat / Toad: trail behind the player
+      const trailAngle = playerAngle + Math.PI;
+      const targetX = player.x + Math.cos(trailAngle) * 30;
+      const targetY = player.y + Math.sin(trailAngle) * 30;
+      companion.x += (targetX - companion.x) * 0.08;
+      companion.y += (targetY - companion.y) * 0.08;
+    }
+
+    // Cat: find nearest uncollected item every frame, pulse timer for animation
+    if (playerCompanion === 1) {
+      let best = null, bestDist = Infinity;
+      const allItems = [
+        ...collectibles.filter(i => !i.collected),
+        ...spellScrolls.filter(s => !s.collected),
+        ...wandUpgrades.filter(u => !u.collected),
+        ...(stone && !stone.collected ? [stone] : []),
+      ];
+      allItems.forEach(item => {
+        const d = Math.hypot(player.x - item.x, player.y - item.y);
+        if (d < bestDist) { bestDist = d; best = item; }
+      });
+      companion.catTarget = best;
+      companion.catPulse = (companion.catPulse + 0.07) % (Math.PI * 2);
+    }
+
+    // Toad: shockwave repel every 5 seconds
+    if (playerCompanion === 2) {
+      companion.toadRepelInterval++;
+      if (companion.toadRepelInterval >= 300) {
+        companion.toadRepelInterval = 0;
+        companion.toadRepelWave = 1;
+        const repelDist = 280;
+        const repelForce = 320;
+        enemies.forEach(e => {
+          const dx = e.x - companion.x, dy = e.y - companion.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < repelDist && dist > 0) {
+            e.x += (dx / dist) * repelForce;
+            e.y += (dy / dist) * repelForce;
+            e.state = 'patrol';
+          }
+        });
+      }
+      if (companion.toadRepelWave > 0) {
+        companion.toadRepelWave++;
+        if (companion.toadRepelWave > 60) companion.toadRepelWave = 0;
+      }
+    }
+  }
+
+  function drawCompanion() {
+    const cx = companion.x - camera.x;
+    const cy = companion.y - camera.y;
+    const comp = COMPANIONS[playerCompanion];
+
+    // Toad: expanding shockwave ring
+    if (playerCompanion === 2 && companion.toadRepelWave > 0) {
+      const t = companion.toadRepelWave / 60;
+      const ringR = t * 300;
+      const alpha = (1 - t) * 0.65;
+      ctx.strokeStyle = `rgba(120,255,80,${alpha})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      // Inner tight ring for impact feel
+      if (t < 0.3) {
+        ctx.strokeStyle = `rgba(200,255,150,${(0.3 - t) / 0.3 * 0.8})`;
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringR * 0.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // Draw the companion figure
+    comp.draw(ctx, cx, cy, 0.55);
+  }
+
+  function gameLoop() {
+    if (gameState === 'playing') {
+      handleInput();
+      updateCamera();
+      updateFogAnimation();
+      checkItemPickup();
+      enemies.forEach(e => e.update());
+      // Spell timers
+      if (spells.lumos.active) {
+        spells.lumos.timer--;
+        if (spells.lumos.timer <= 0) { spells.lumos.active = false; }
+      }
+      for (const spell of Object.values(spells)) {
+        if (spell.cooldownTimer > 0) spell.cooldownTimer--;
+      }
+      if (alohomoraMsg > 0) alohomoraMsg--;
+      updateCompanion();
+    }
+    draw();
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Controls
+  window.addEventListener("keydown", e => {
+    const key = e.key.toLowerCase();
+
+    // House selection on sorting menu
+    if (gameState === 'menu') {
+      const idx = parseInt(e.key) - 1;
+      if (idx >= 0 && idx <= 3) { playerHouse = idx; gameState = 'companion'; return; }
+      if (key === 'a' || key === 'arrowleft')  { hoveredHouse = ((hoveredHouse ?? 0) + 3) % 4; return; }
+      if (key === 'd' || key === 'arrowright') { hoveredHouse = ((hoveredHouse ?? 0) + 1) % 4; return; }
+      if (key === 'w' || key === 's' || key === 'arrowup' || key === 'arrowdown') {
+        if (hoveredHouse === null) { hoveredHouse = 0; return; }
+      }
+      if (key === 'enter' || key === ' ') {
+        if (hoveredHouse !== null) { playerHouse = hoveredHouse; gameState = 'companion'; }
+        return;
+      }
+      return;
+    }
+
+    // Companion selection screen
+    if (gameState === 'companion') {
+      const idx = parseInt(e.key) - 1;
+      if (idx >= 0 && idx <= 2) { playerCompanion = idx; gameState = 'playing'; return; }
+      if (key === 'a' || key === 'arrowleft')  { hoveredCompanion = ((hoveredCompanion + 2) % 3); return; }
+      if (key === 'd' || key === 'arrowright') { hoveredCompanion = ((hoveredCompanion + 1) % 3); return; }
+      if (key === 'enter' || key === ' ') { playerCompanion = hoveredCompanion; gameState = 'playing'; return; }
+      return;
+    }
+
+    if (key === 'r' && gameState !== 'playing' && gameState !== 'paused') {
+      location.reload();
+      return;
+    }
+
+    if ((key === 'p' || key === 'escape') && (gameState === 'playing' || gameState === 'paused')) {
+      gameState = gameState === 'paused' ? 'playing' : 'paused';
+      return;
+    }
+
+    if (gameState !== 'playing') return;
+
+    if (key === 'e' && hasWand) {
+      wandEnabled = !wandEnabled;
+    }
+    if (key === 'q' && hasCloak) {
+      cloakEnabled = !cloakEnabled;
+    }
+    if (key === 'z') castSpell('lumos');
+    if (key === 'x') castSpell('stupefy');
+    if (key === 'c') castSpell('alohomora');
+
+    if (keys.hasOwnProperty(key)) keys[key] = true;
+  });
+
+  window.addEventListener("keyup", e => {
+    const key = e.key.toLowerCase();
+    if (keys.hasOwnProperty(key)) keys[key] = false;
+  });
+
+  // Sorting menu mouse interaction
+  function getHoveredCard(mouseX, mouseY) {
+    const panelW = Math.min(760, canvas.width - 60);
+    const panelY = (canvas.height - 440) / 2;
+    const cardW = 148, cardH = 210;
+    const cardGap = (panelW - 4 * cardW - 80) / 3;
+    const cardsStartX = (canvas.width - panelW) / 2 + 40;
+    const cardY = panelY + 110;
+    for (let i = 0; i < 4; i++) {
+      const cx = cardsStartX + i * (cardW + cardGap);
+      if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY - 6 && mouseY <= cardY + cardH) return i;
+    }
+    return null;
+  }
+
+  function getHoveredCompanionCard(mouseX, mouseY) {
+    const panelW = Math.min(660, canvas.width - 60);
+    const panelY = (canvas.height - 400) / 2;
+    const cardW = 160, cardH = 220;
+    const totalCardsW = 3 * cardW + 2 * 24;
+    const cardsStartX = (canvas.width - totalCardsW) / 2;
+    const cardY = panelY + 104;
+    for (let i = 0; i < 3; i++) {
+      const cx = cardsStartX + i * (cardW + 24);
+      if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY - 6 && mouseY <= cardY + cardH) return i;
+    }
+    return null;
+  }
+
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    if (gameState === 'menu') hoveredHouse = getHoveredCard(mx, my);
+    if (gameState === 'companion') { const i = getHoveredCompanionCard(mx, my); if (i !== null) hoveredCompanion = i; }
+  });
+
+  canvas.addEventListener('click', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    if (gameState === 'menu') {
+      const idx = getHoveredCard(mx, my);
+      if (idx !== null) { playerHouse = idx; gameState = 'companion'; }
+    } else if (gameState === 'companion') {
+      const idx = getHoveredCompanionCard(mx, my);
+      if (idx !== null) { playerCompanion = idx; gameState = 'playing'; }
+    }
+  });
+
+  gameLoop();
+  </script>
+  </body>
+</html>
